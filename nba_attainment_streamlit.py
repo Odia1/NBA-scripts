@@ -4,12 +4,7 @@ import numpy as np
 from io import BytesIO
 
 # --------------- Parsing Functions ---------------------------------
-
 def parse_mapping(df):
-    """
-    Parses your new Assessment-to-CO mapping.
-    Expects columns: AssessmentName | Weightage% | Marks | CO1 | CO2 | CO3 | CO4 ...
-    """
     co_cols = [c for c in df.columns if c.startswith("CO")]
     records = []
     for _, row in df.iterrows():
