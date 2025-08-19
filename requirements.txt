@@ -1,0 +1,15 @@
+# Core libraries
+streamlit==1.32.2
+pandas==2.2.1
+numpy==1.26.4
+
+# Excel support
+openpyxl==3.1.2      # for reading Excel (.xlsx)
+xlsxwriter==3.1.2    # for writing styled Excel outputs
+
+# Scientific / optimization
+scipy==1.12.0
+
+# Optional but useful
+matplotlib==3.8.3    # if you want charts/plots
+seaborn==0.13.2      # nicer plots
