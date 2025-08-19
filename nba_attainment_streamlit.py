@@ -8,13 +8,13 @@ from io import BytesIO
 def parse_mapping(df):
     """
     Parses your new Assessment-to-CO mapping.
-    Expects columns: Assessment Name | Weightage % | Marks | CO1 | CO2 | CO3 | CO4 ...
+    Expects columns: AssessmentName | Weightage% | Marks | CO1 | CO2 | CO3 | CO4 ...
     """
     co_cols = [c for c in df.columns if c.startswith("CO")]
     records = []
     for _, row in df.iterrows():
-        assessment = str(row['Assessment Name']).strip()
-        weight = float(row['Weightage %'])
+        assessment = str(row['AssessmentName']).strip()
+        weight = float(row['Weightage%'])
         max_marks = float(row['Marks'])
         co_map = [co for co in co_cols if str(row[co]).strip() == "✓"]
         records.append({
@@ -224,7 +224,7 @@ if st.button("✅ Compute CO/PO/PSO attainment",
 with st.expander("Show Example Templates"):
     st.markdown("""
 **Assessment-to-CO Mapping (comma or tab-separated):**  
-| Assessment Name | Weightage % | Marks | CO1 | CO2 | CO3 | CO4 |
+| AssessmentName | Weightage% | Marks | CO1 | CO2 | CO3 | CO4 |
 |-----------------|-------------|-------|-----|-----|-----|-----|
 | Assignment - 1  | 2.5         | 50    | ✓   | ✓   |     |     |
 | Quiz - 1        | 2.5         | 50    | ✓   | ✓   |     |     |
