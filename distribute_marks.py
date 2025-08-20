@@ -183,8 +183,12 @@ if scheme_file:
             )
             for a, m in zip(assessments, marks):
                 filled_df.at[idx, a] = int(m)
+
         st.success("✅ Assessment marks distributed (all constraints enforced):")
-        st.dataframe(filled_df)
+        if len(filled_df) <= 5:
+            st.dataframe(filled_df)
+        else:
+            st.info(f"Generated file has {len(filled_df)} student records (not displaying table for brevity).")
         st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name=output_filename)
     else:
         st.info("Upload student records file to continue.")
