@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import os
@@ -8,8 +9,8 @@ st.title("Automated Assignment of Marks Per Question")
 st.markdown("""
 **Instructions:**
 - Upload your assessment CSV with *any* column/total labels, up to 5 header rows, and student records after.
-- Ensure the structure: the first two columns are Name/Roll, question columns, then 5 CO columns (ignored), last column is total marks.
-- Click "Assign Random Marks" and download the result. -- Prof. Priyadarsan Patra
+- The first two columns are always Name/Roll, then some question columns (these will have numeric max marks in row 2 or 3), then five ignored columns, then the last column with total marks.
+- File preview limited to 5 or fewer students. -- Prof. Priyadarsan Patra
 """)
 
 uploaded_file = st.file_uploader("Upload the input CSV", type=["csv"])
@@ -19,28 +20,36 @@ if uploaded_file:
     base, ext = os.path.splitext(input_filename)
     output_filename = f"{base}_filled{ext}"
 
-    df_raw = pd.read_csv(uploaded_file, header=None)
+    df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
     n_cols = df_raw.shape[1]
-    record_start = 5                    # Student records start from row 5 (0-based)
+    record_start = 5  # Data starts from 6th row (index 5)
 
-    first_two_cols = [0, 1]
-    last_col = n_cols - 1
-    last_5_co_cols = list(range(last_col - 5, last_col))
+    # Find question columns by checking for numeric "max marks" in header row 2 or 3.
+    # We'll use row 2 (index 2) for max marks
+    # Any column that can be *fully* and *positively* converted to int in that row is a question column
+    max_marks_row = df_raw.iloc[2].fillna('').astype(str)
+    question_indices = []
+    max_marks_list = []
+    question_labels = []
+    for col in range(2, n_cols - 6):  # Be tolerant, go broader than you expect (last 6 col: 5 CO + 1 total)
+        val = max_marks_row.iloc[col].strip()
+        if val.isdigit():
+            question_indices.append(col)
+            max_marks_list.append(int(val))
+            # The first row (index 0) is the label
+            question_labels.append(str(df_raw.iloc[0, col]))
+        else:
+            break  # Expect contiguous question columns; stop at first non-question col.
 
-    question_start = 2
-    question_end = last_col - 5         # exclusive
-
-    n_questions = question_end - question_start
-
-    # Get question labels, max marks (from header rows 0 and 2)
-    question_labels = df_raw.iloc[0, question_start:question_end].tolist()
-    try:
-        max_marks_list = df_raw.iloc[2, question_start:question_end].astype(int).tolist()
-    except:
-        st.error("Error: Could not parse 'max marks' row. Please check that the third header row has integers for maximum marks.")
+    n_questions = len(question_indices)
+    if n_questions == 0:
+        st.error("Could not detect any question columns. Are the max marks entered as integers in header row 3?")
         st.stop()
 
-    # Robust, always-possible partition function
+    # Now reliably detect last col as the Total
+    last_col = n_cols - 1
+
+    # Assignment function: always possible if value in range
     def random_partition_with_upper_bounds(total, max_bounds):
         n = len(max_bounds)
         marks = []
@@ -67,9 +76,13 @@ if uploaded_file:
         name = row[0]
         roll = row[1]
         try:
-            total_marks = int(row[last_col])
+            total_marks = int(str(row[last_col]).strip())
         except:
             st.warning(f"Could not read total marks for {name} at row {i+1}. Skipping student.")
+            continue
+
+        if total_marks < 0 or total_marks > sum(max_marks_list):
+            st.warning(f"Total marks {total_marks} for {name} is not possible given question bounds (max {sum(max_marks_list)}). Skipping student.")
             continue
 
         marks = random_partition_with_upper_bounds(total_marks, max_marks_list)
@@ -87,7 +100,6 @@ if uploaded_file:
     )
 
     df_result = pd.DataFrame(output_rows, columns=output_columns)
-    # Number of student records
     num_students = len(df_raw) - record_start
 
     if num_students <= 5:
