@@ -159,15 +159,21 @@ if scheme_file:
         filled_df = stu_df.copy()
         N = len(assessments)
         for idx, row in filled_df.iterrows():
+            # ... inside for-loop over students
             total = float(row['Total Marks out of 100'])
+
+            # Randomize alphas a little for each student even with same total
+            row_noise = np.random.uniform(0.8, 1.2, size=len(alphas))
+            alphas_for_this_student = np.array(alphas) * row_noise
+            
             marks = marks_given_total(
-                total, N, minmarks, maxmarks, weights, maxmarks, alphas, assessments
+                total, N, minmarks, maxmarks, weights, maxmarks, alphas_for_this_student, assessments
             )
             for a, m in zip(assessments, marks):
                 filled_df.at[idx, a] = int(m)
-        st.success("✅ Assessment marks distributed (all constraints enforced):")
-        st.dataframe(filled_df)
-        st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name="filled_student_marks.csv")
+                st.success("✅ Assessment marks distributed (all constraints enforced):")
+                st.dataframe(filled_df)
+                st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name="filled_student_marks.csv")
     else:
         st.info("Upload student records file to continue.")
 else:
