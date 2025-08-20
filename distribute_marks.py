@@ -185,7 +185,7 @@ if scheme_file:
                 filled_df.at[idx, a] = int(m)
         st.success("✅ Assessment marks distributed (all constraints enforced):")
         st.dataframe(filled_df)
-        st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name=output_filename")
+        st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name=output_filename)
     else:
         st.info("Upload student records file to continue.")
 else:
