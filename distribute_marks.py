@@ -1,34 +1,28 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import os
 from scipy.optimize import linprog
 
-st.set_page_config(page_title="Randomized Student Assessment Mark Allocator", layout="centered")
+st.set_page_config(page_title="Robust Assessment Mark Allocator (Strict Sum)", layout="centered")
 
-st.title("Randomized Student Assessment Mark Allocator (Partial/Flexible, Strict Total)")
+st.title("Robust Student Assessment Mark Allocator (Partial Filling, Guaranteed Sum)")
 
 st.markdown("""
 Upload your **Marking Scheme** and **Student Records** as CSV files.
-
 ---
-#### <u>**Hard Constraints (Always Enforced):**</u>
-- **If “Total Marks out of 100” ≥ 35:**  
-   Each assessment mark is between **30%** (min) and **100%** (max).
-- **If “Total Marks out of 100” < 35:**  
-   The 30% minimum per assessment is *waived* (assessments can be zero).
-- Any **non-empty entry** for a student's assessment component is **retained and never changed**.
-- For every student:  
-   **End-Semester Exam marks (%) ≤ their Total Marks (%)**.
-- The **weighted sum (see scheme)** of all assessment marks matches their “Total Marks out of 100” (within ±0.5 for rounding).
-- If the pre-filled entries make this impossible, the row is flagged in `Remarks`.
+##ProPatra## <u>**Hard Constraints (Enforced):**</u>
+- Each assessment mark between 30% & 100% (if total ≥ 35), else 0 to 100%.
+- Pre-filled assessment marks in student file are strictly kept as fixed.
+- Sum of all weighted assessment marks matches "Total Marks out of 100" for each student (matching within ±0.5 due to rounding).
+- Any infeasible row (where fixed + possible free marks can't reach total) is flagged, and missing marks left blank.
 
-#### <u>**Soft Constraints (Random Bias):**</u>
-- Attendance marks tend to be high, End-Semester marks tend to be low. All else random.
+#### <u>**Soft Constraints:**</u>
+- Attendance marks tend to be high; End-Sem tends to be low, all else random.
 ---
 """, unsafe_allow_html=True)
 
+# -- templates
 marking_scheme_sample = (
     "AssessmentName,Weightage%,MaxMarks\n"
     "Assignment - 1,2.5,50\n"
@@ -42,12 +36,12 @@ marking_scheme_sample = (
 )
 student_record_sample = (
     "Marks Distributed,Total Marks out of 100,Assignment - 1,Quiz - 1,Mid-Term,Assignment - 2,Quiz - 2,Surprise Test,Attendance,End-Semester Exam\n"
-    "Student 1,75,?,?,?,40,37,?,?,?\n"
+    "Student 1,75,?,?,40,38,37,?,?,?\n"
     "Student 2,32,?,?,?,?,?,?,?,?\n"
     "Student 3,82,?,?,?,?,?,?,?,?\n"
     "Student 4,55,?,?,18,?,?,?,?,?\n"
     "Student 5,77,12,?,30,18,?,?,?,?,?\n"
-    "Student 6,95,?,?,?,?,?,?,?,?\n"
+    "Student 6,95,?,?,?,15,?,?,?,?\n"
 )
 
 st.subheader("Step 1: Upload Marking Scheme CSV")
@@ -99,139 +93,155 @@ if scheme_file:
             else:
                 alphas.append(1.0)
 
-        def marks_given_total(total, N, minmarks, maxmarks, weights, maxmarks_vec, alphas, assessments):
-            # Find End-Semester Exam index, if present
-            end_sem_idx = None
-            for i, a in enumerate(assessments):
-                if "end-semester" in a.lower():
-                    end_sem_idx = i
-                    break
-            minmarks_cur = minmarks.copy()
-            maxmarks_cur = maxmarks_vec.copy()
-            if end_sem_idx is not None:
-                # Cap End-Sem such that it can't exceed student's overall %
-                endsem_cap = min(
-                    maxmarks_vec[end_sem_idx],
-                    (total / 100) * maxmarks_vec[end_sem_idx]
-                )
-                maxmarks_cur[end_sem_idx] = max(endsem_cap, minmarks_cur[end_sem_idx])
-            minfrac = minmarks_cur / maxmarks_vec
-            maxfrac = maxmarks_cur / maxmarks_vec
-            for _ in range(1200):
-                dirichlet_bias = np.random.uniform(0.85, 1.15, size=len(alphas))
-                alphas_this_student = np.array(alphas) * dirichlet_bias
-                direction = np.random.dirichlet(alphas_this_student)
-                w = weights
-                a = np.sum(direction * w)
-                if a == 0:
-                    continue
-                s = (total - np.sum(minfrac * w)) / a
-                if s < 0:
-                    continue
-                if not np.all(s * direction <= (maxfrac - minfrac)):
-                    continue
-                frac = minfrac + s * direction
-                marks_cont = frac * maxmarks_vec
-                if end_sem_idx is not None:
-                    marks_cont[end_sem_idx] = min(marks_cont[end_sem_idx], maxmarks_cur[end_sem_idx])
-                marks_int = np.round(marks_cont)
-                weighted = np.sum((marks_int / maxmarks_vec) * weights)
-                if (
-                    np.all(marks_int >= minmarks_cur)
-                    and np.all(marks_int <= maxmarks_cur)
-                    and np.abs(weighted - total) < 0.51
-                ):
-                    return marks_int.astype(int)
-            # Fallback: LP with these constraints
-            c = np.random.rand(N)
-            A_eq = [(weights / maxmarks_vec).tolist()]
-            b_eq = [total]
-            bounds = [(float(minmarks_cur[i]), float(maxmarks_cur[i])) for i in range(N)]
-            res = linprog(
+        # CORE generator with integer-aware sum enforcement
+        def marks_given_total_hard(
+            total, N, minmarks, maxmarks, weights, maxmarks_vec, alphas, assessments, fixed=None
+        ):
+            # fixed: index -> value
+            to_fill = list(range(N))
+            fixed_idx = []
+            fixed_val = []
+            if fixed is not None:
+                for i, v in fixed.items():
+                    fixed_idx.append(i)
+                    fixed_val.append(v)
+                to_fill = [i for i in range(N) if i not in fixed]
+            # Setup bounds for to_fill only
+            minm = minmarks[to_fill]
+            maxm = maxmarks[to_fill]
+            wts = weights[to_fill]
+            mx = maxmarks_vec[to_fill]
+            alph = [alphas[i] for i in to_fill]
+            assess = [assessments[i] for i in to_fill]
+            # For End-Sem exam: cap as needed
+            # Find End-Sem index among to_fill (NOT global!)
+            if any("end-semester" in assessments[i].lower() for i in to_fill):
+                end_sem_local = [j for j, i in enumerate(to_fill) if "end-semester" in assessments[i].lower()][0]
+                # max value for endsem: no more than (total/100) × max, or original upper
+                endsem_cap = min(mx[end_sem_local], (total / 100) * mx[end_sem_local])
+                maxm[end_sem_local] = max(endsem_cap, minm[end_sem_local])
+            # constraints: minm ≤ x ≤ maxm; sum_i (x_i / mx_i) * wts_i == needed_total
+            # Also, account for fixeds in total
+            tot_fix = 0.0
+            if fixed:
+                for j, i in enumerate(fixed_idx):
+                    tot_fix += (fixed_val[j] / maxmarks[i]) * weights[i]
+            remaining_total = total - tot_fix
+
+            # Feasibility check
+            min_possible = np.sum((minm / mx) * wts)
+            max_possible = np.sum((maxm / mx) * wts)
+            if remaining_total < min_possible - 1e-6 or remaining_total > max_possible + 1e-6:
+                return None  # infeasible
+
+            # Try a "random feasible int" approach using LP + integer adjustment loop
+            # Solve LP for real numbers
+            c = np.random.rand(len(to_fill))  # random obj, for soft bias
+            A_eq = [(wts / mx).tolist()]
+            b_eq = [remaining_total]
+            bounds = [(float(minm[i]), float(maxm[i])) for i in range(len(to_fill))]
+            lp = linprog(
                 c,
                 A_eq=A_eq,
                 b_eq=b_eq,
                 bounds=bounds,
                 method='highs'
             )
-            if res.success:
-                marks_int = np.round(res.x)
-                weighted = np.sum((marks_int / maxmarks_vec) * weights)
-                if (
-                    np.all(marks_int >= minmarks_cur)
-                    and np.all(marks_int <= maxmarks_cur)
-                    and np.abs(weighted - total) < 0.51
-                ):
-                    return marks_int.astype(int)
-            return minmarks_cur.astype(int)
+            if not (lp.success):
+                return None
+            x = lp.x
+            # Now: round to integers & adjust
+            int_best = np.round(x)
+            # Repeat search if needed (try small noise, then fix sum)
+            def sum_from(v):
+                return np.sum((v / mx) * wts)
+            weighted = sum_from(int_best)
+            delta = remaining_total - weighted
+            if abs(delta) <= 0.51:
+                filled_vals = int_best.astype(int)
+            else:
+                # Simple greedy correction: add/remove points on least/fewest-weighted fields
+                # Try adding/subtracting one mark at a time to bring it within 0.5
+                done = False
+                for sign in [1, -1]:
+                    for idx in np.argsort(wts / mx):
+                        seq = int_best.copy()
+                        seq[idx] += sign
+                        # stay within bounds!
+                        if seq[idx] < minm[idx] or seq[idx] > maxm[idx]:
+                            continue
+                        test_weighted = sum_from(seq)
+                        if abs(test_weighted - remaining_total) <= 0.51:
+                            filled_vals = seq.astype(int)
+                            done = True
+                            break
+                    if done:
+                        break
+                else:
+                    filled_vals = int_best.astype(int)
+            # Put back in global order:
+            result = [None] * N
+            jj = 0
+            for i in range(N):
+                if fixed and i in fixed:
+                    result[i] = fixed[i]
+                else:
+                    result[i] = int(round(filled_vals[jj]))
+                    jj += 1
+            return result
 
         filled_df = stu_df.copy()
         N = len(assessments)
-
         if "Remarks" not in filled_df.columns:
             filled_df["Remarks"] = ""
+
         for idx, row in filled_df.iterrows():
             total = float(row['Total Marks out of 100'])
-            # Identify fixed/free components
-            fixed_indices = []
+            fixed = {}
             free_indices = []
-            fixed_marks = []
+            # Find which indices are fixed.
             for i, a in enumerate(assessments):
                 v = row[a]
                 if pd.notnull(v) and str(v).strip() not in {"", "?"}:
                     try:
                         fixed_val = float(v)
-                        fixed_indices.append(i)
-                        fixed_marks.append(fixed_val)
+                        fixed[i] = fixed_val
                     except:
                         free_indices.append(i)
                 else:
                     free_indices.append(i)
-            # Min marks waiver for low total
+
+            # Min marks logic
             if total < 35:
                 minmarks_row = np.zeros_like(minmarks_standard)
             else:
                 minmarks_row = minmarks_standard.copy()
-            # Free components vectors:
-            weights_free = weights[free_indices]
-            maxmarks_free = maxmarks[free_indices]
-            minmarks_free = minmarks_row[free_indices]
-            assessments_free = [assessments[i] for i in free_indices]
-            alphas_free = [alphas[i] for i in free_indices]
-            # Contribution of fixed fields
-            fixed_total = 0.0
-            for j, i in enumerate(fixed_indices):
-                fixed_total += (fixed_marks[j] / maxmarks[i]) * weights[i]
-            remaining_total = total - fixed_total
-            min_possible = np.sum((minmarks_free / maxmarks_free) * weights_free)
-            max_possible = np.sum((maxmarks_free / maxmarks_free) * weights_free)
-            # Feasibility check:
-            if remaining_total < min_possible - 1e-6 or remaining_total > max_possible + 1e-6:
-                for n, i in enumerate(free_indices):
-                    filled_df.at[idx, assessments[i]] = np.nan
-                filled_df.at[idx, "Remarks"] = (
-                    f"Cannot reach total. With fixed marks, possible total is "
-                    f"{min_possible + fixed_total:.2f}–{max_possible + fixed_total:.2f}"
-                )
-                for n, i in enumerate(fixed_indices):
-                    filled_df.at[idx, assessments[i]] = int(fixed_marks[n])
-                continue
-            # If all fixed, just output fixed, clear remarks
-            if len(free_indices) == 0:
-                for n, i in enumerate(fixed_indices):
-                    filled_df.at[idx, assessments[i]] = int(fixed_marks[n])
-                filled_df.at[idx, "Remarks"] = ""
-                continue
-            # Otherwise, fill remaining fields
-            marks_free = marks_given_total(
-                remaining_total, len(free_indices), minmarks_free, maxmarks_free,
-                weights_free, maxmarks_free, alphas_free, assessments_free
+
+            # Use marks_given_total_hard for partial
+            marks = marks_given_total_hard(
+                total, N, minmarks_row, maxmarks, weights, maxmarks, alphas, assessments, fixed=fixed
             )
-            for n, i in enumerate(free_indices):
-                filled_df.at[idx, assessments[i]] = int(marks_free[n])
-            for n, i in enumerate(fixed_indices):
-                filled_df.at[idx, assessments[i]] = int(fixed_marks[n])
+
+            if marks is None:
+                for i in free_indices:
+                    filled_df.at[idx, assessments[i]] = np.nan
+                filled_df.at[idx, "Remarks"] = "INFEASIBLE: Cannot reach total marks with these fixed values."
+                for i, val in fixed.items():
+                    filled_df.at[idx, assessments[i]] = val
+                continue
+            # Done: fill all
+            for i, val in enumerate(marks):
+                filled_df.at[idx, assessments[i]] = int(round(val))
             filled_df.at[idx, "Remarks"] = ""
+
+            # Verify sum matches required total (debug/guarantee, for transparency)
+            weightedsum = np.sum(
+                (np.array([float(filled_df.at[idx, a]) for a in assessments]) / maxmarks) * weights
+            )
+            if abs(weightedsum - total) > 0.51:
+                filled_df.at[idx, "Remarks"] = (
+                    f"BUG: Refused to match total (got {weightedsum:.2f} vs requested {total} after rounding)"
+                )
 
         st.success("✅ Assessment marks distributed (all constraints enforced):")
         if len(filled_df) <= 5:
@@ -239,7 +249,6 @@ if scheme_file:
         else:
             st.info(f"Generated file has {len(filled_df)} student records (not displaying table for brevity).")
 
-        # Name output file based on upload
         input_filename = records_file.name if records_file is not None else "filled_student_marks.csv"
         base, ext = os.path.splitext(input_filename)
         output_filename = f"{base}_filled{ext}"
