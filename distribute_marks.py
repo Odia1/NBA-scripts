@@ -79,9 +79,14 @@ if scheme_file:
         if "Total Marks out of 100" not in stu_df.columns:
             st.error("Missing column: 'Total Marks out of 100' in student file.")
             st.stop()
-        st.write("**Loaded student records:**")
-        st.dataframe(stu_df)
 
+        st.write("**Loaded student records:**")
+        if len(stu_df) <= 5:
+            st.dataframe(stu_df)
+        else:
+            st.info(f"Student records file has {len(stu_df)} records (not displaying table for brevity).")
+
+ 
         # --- Dirichlet bias for soft constraints
         alphas = []
         for a in assessments:
