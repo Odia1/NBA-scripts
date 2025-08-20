@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import io
 import random
 
 st.title("Automated Assignment of Marks Per Question")
@@ -99,9 +100,20 @@ if uploaded_file:
     else:
         st.info(f"Input and output data not displayed (record count: {num_students}, limit for display: 5)")
 
+
+    # Prepare the header rows (from the original input), as plain text lines
+    # Convert them to comma-separated strings
+    header_rows = df_raw.iloc[:5, :].fillna('').astype(str).values.tolist()
+    header_csv_lines = [','.join(row) for row in header_rows]
+
+    # Prepare CSV output for data
+    student_data_csv = df_result.to_csv(index=False, header=False)
+    # Combine header and assigned marks
+    final_csv = '\n'.join(header_csv_lines) + '\n' + student_data_csv
+       
     st.download_button(
-        label="Download CSV",
-        data=df_result.to_csv(index=False),
+        label="Download output CSV",
+        data=final_csv,
         file_name=output_filename,
         mime="text/csv"
     )
