@@ -6,7 +6,7 @@ from scipy.optimize import linprog
 
 st.set_page_config(page_title="Robust Assessment Mark Allocator (Strict Sum)", layout="centered")
 
-st.title("Robust Student Assessment Mark Allocator (Partial Filling, Guaranteed Sum, 60% Cap for <35)")
+st.title("Robust Student Assessment Mark Allocator")
 
 st.markdown("""
 Upload your **Marking Scheme** and **Student Records** as CSV files.
@@ -19,7 +19,7 @@ Upload your **Marking Scheme** and **Student Records** as CSV files.
 - Any infeasible row (where fixed + possible free marks can't reach total) is flagged, and missing marks left blank.
 
 #### <u>**Soft Constraints:**</u>
-- Attendance marks tend to be high; End-Sem tends to be low, all else random.
+- Attendance marks tend to be high; End-Sem tends to be low, all else random. (Partial Filling, Guaranteed Sum, 60% Cap for <35)
 ---
 """, unsafe_allow_html=True)
 
