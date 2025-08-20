@@ -23,9 +23,9 @@ if uploaded_file:
     n_cols = df_raw.shape[1]
     record_start = 5  # Data starts from 6th row (index 5)
 
-    # Questions: columns 2 to n_cols-6 (exclusive as end in Python)
+    # Questions: columns 2 to n_cols-5 (exclusive as end in Python -- not counting the last 5 columns)
     question_start = 2
-    question_end = n_cols - 6
+    question_end = n_cols - 5
 
     question_labels = df_raw.iloc[0, question_start:question_end].tolist()
     try:
@@ -138,7 +138,7 @@ if uploaded_file:
     question_indices = []
     max_marks_list = []
     question_labels = []
-    for col in range(2, n_cols - 6):  # Be tolerant, go broader than you expect (last 6 col: 5 CO + 1 total)
+    for col in range(2, n_cols - 5):  # Be tolerant, go broader than you expect (last 5 col: 4 CO + 1 total)
         val = max_marks_row.iloc[col].strip()
         if val.isdigit():
             question_indices.append(col)
