@@ -26,8 +26,6 @@ Upload your **Marking Scheme** and **Student Records** as CSV files.
 
 #### <u>**Soft Constraints (Random Bias):**</u>
 - Attendance marks tend to be high, End-Semester marks tend to be low. All else random.
-
-*Any field left empty for a student record will be filled with values within the constraints.
 ---
 """, unsafe_allow_html=True)
 
