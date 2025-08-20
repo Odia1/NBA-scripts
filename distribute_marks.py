@@ -5,22 +5,25 @@ from scipy.optimize import linprog
 
 st.set_page_config(page_title="Randomized Student Assessment Mark Allocator", layout="centered")
 
-st.title("Randomized Student Assessment Mark Allocator (with Constraints)")
+st.title("Randomized Student Assessment Mark Allocator (with Flexible Min Marks)")
 
 st.markdown("""
 Upload your **Marking Scheme** and **Student Records** as CSV files.
 
 ---
 
-#### <u>**Hard Constraints (Always Enforced):**</u>
-- Each assessment mark is between **30%** (minimum) and **100%** (maximum) of its max marks.
-- For each student:  
-    **End-Semester Exam marks (%) ≤ their Total Marks (%)** (i.e. "End-Semester Exam" marks are not better than their total marks percentage).
+#### <u>**Hard Constraints (Enforced):**</u>
+- **If “Total Marks out of 100” ≥ 35:**  
+    Each assessment mark is between **30%** (minimum) and **100%** (maximum) of its max marks.
+- **If “Total Marks out of 100” < 35:**  
+    The 30% minimum per assignment is *waived* (assessments can be zero).
+- For every student:  
+    **End-Semester Exam marks (%) ≤ their Total Marks (%)**.
 - The **weighted sum** of assessment marks (as per the scheme) matches their “Total Marks out of 100”.
 <br>
 #### <u>**Soft Constraints (Bias in Randomization):**</u>
 - Attendance marks are **more likely high**.
-- End-Semester Exam marks are **less likely high**, except as needed to satisfy overall constraints.
+- End-Semester Exam marks are **less likely high** (except as needed to satisfy overall constraints).
 
 ---
 """, unsafe_allow_html=True)
@@ -39,7 +42,8 @@ marking_scheme_sample = (
 student_record_sample = (
     "Marks Distributed,Total Marks out of 100,Assignment - 1,Quiz - 1,Mid-Term,Assignment - 2,Quiz - 2,Surprise Test,Attendance,End-Semester Exam\n"
     "Student 1,75,?,?,?,?,?,?,?,?\n"
-    "Student 2,82,?,?,?,?,?,?,?,?\n"
+    "Student 2,32,?,?,?,?,?,?,?,?\n"
+    "Student 3,82,?,?,?,?,?,?,?,?\n"
 )
 
 st.subheader("Step 1: Upload Marking Scheme CSV")
@@ -53,7 +57,7 @@ if scheme_file:
         assessments = scheme_df["AssessmentName"].tolist()
         weights = scheme_df["Weightage%"].astype(float).to_numpy()
         maxmarks = scheme_df["MaxMarks"].astype(float).to_numpy()
-        minmarks = np.floor(0.3 * maxmarks)
+        minmarks_standard = np.floor(0.3 * maxmarks)
     except Exception as e:
         st.error(f"Error in scheme file: {e}")
         st.stop()
@@ -78,15 +82,15 @@ if scheme_file:
         st.write("**Loaded student records:**")
         st.dataframe(stu_df)
 
-        # --- Dirichlet soft constraint settings ---
+        # --- Dirichlet bias for soft constraints
         alphas = []
         for a in assessments:
             if a.lower().strip() == "attendance":
-                alphas.append(12.0)  # heavily favor high
+                alphas.append(12.0)
             elif "end-semester" in a.lower():
-                alphas.append(0.4)   # heavily favor low
+                alphas.append(0.4)
             else:
-                alphas.append(1.0)   # neutral
+                alphas.append(1.0)
 
         def marks_given_total(total, N, minmarks, maxmarks, weights, maxmarks_vec, alphas, assessments):
             # Find End-Semester Exam index, if present
@@ -95,21 +99,21 @@ if scheme_file:
                 if "end-semester" in a.lower():
                     end_sem_idx = i
                     break
-            # Copy min/max for per-student adjustment
             minmarks_cur = minmarks.copy()
             maxmarks_cur = maxmarks_vec.copy()
-            # Enforce end-semester hard cap based on student's total%
             if end_sem_idx is not None:
                 endsem_cap = min(
                     maxmarks_vec[end_sem_idx],
                     (total / 100) * maxmarks_vec[end_sem_idx]
                 )
-                # End-semester cannot be above its minmark even if cap is lower
                 maxmarks_cur[end_sem_idx] = max(endsem_cap, minmarks_cur[end_sem_idx])
             minfrac = minmarks_cur / maxmarks_vec
             maxfrac = maxmarks_cur / maxmarks_vec
             for _ in range(1000):
-                direction = np.random.dirichlet(alphas)
+                # Small per-student randomization of alpha vector
+                dirichlet_bias = np.random.uniform(0.85, 1.15, size=len(alphas))
+                alphas_this_student = np.array(alphas) * dirichlet_bias
+                direction = np.random.dirichlet(alphas_this_student)
                 w = weights
                 a = np.sum(direction * w)
                 if a == 0:
@@ -121,19 +125,17 @@ if scheme_file:
                     continue
                 frac = minfrac + s * direction
                 marks_cont = frac * maxmarks_vec
-                # End-sem hard cap, after float computations & rounding
                 if end_sem_idx is not None:
                     marks_cont[end_sem_idx] = min(marks_cont[end_sem_idx], maxmarks_cur[end_sem_idx])
                 marks_int = np.round(marks_cont)
                 weighted = np.sum((marks_int / maxmarks_vec) * weights)
-                # Final checks
                 if (
                     np.all(marks_int >= minmarks_cur)
                     and np.all(marks_int <= maxmarks_cur)
                     and np.abs(weighted - total) < 0.51
                 ):
                     return marks_int.astype(int)
-            # Fallback: LP with these hard constraints
+            # Fallback: LP with these constraints
             c = np.random.rand(N)
             A_eq = [(weights / maxmarks_vec).tolist()]
             b_eq = [total]
@@ -159,23 +161,21 @@ if scheme_file:
         filled_df = stu_df.copy()
         N = len(assessments)
         for idx, row in filled_df.iterrows():
-            # ... inside for-loop over students
             total = float(row['Total Marks out of 100'])
-
-            # Randomize alphas a little for each student even with same total
-            row_noise = np.random.uniform(0.8, 1.2, size=len(alphas))
-            alphas_for_this_student = np.array(alphas) * row_noise
-            
+            # Waive per-assessment minimum if total < 35
+            if total < 35:
+                minmarks_row = np.zeros_like(minmarks_standard)
+            else:
+                minmarks_row = minmarks_standard.copy()
             marks = marks_given_total(
-                total, N, minmarks, maxmarks, weights, maxmarks, alphas_for_this_student, assessments
+                total, N, minmarks_row, maxmarks, weights, maxmarks, alphas, assessments
             )
             for a, m in zip(assessments, marks):
                 filled_df.at[idx, a] = int(m)
-                st.success("✅ Assessment marks distributed (all constraints enforced):")
-                st.dataframe(filled_df)
-                st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name="filled_student_marks.csv")
+        st.success("✅ Assessment marks distributed (all constraints enforced):")
+        st.dataframe(filled_df)
+        st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name="filled_student_marks.csv")
     else:
         st.info("Upload student records file to continue.")
 else:
     st.info("Upload your marking scheme file to start.")
-
