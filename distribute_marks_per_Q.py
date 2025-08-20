@@ -1,7 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import io
 import os
 import random
 
@@ -10,7 +8,7 @@ st.title("Automated Assignment of Marks Per Question")
 st.markdown("""
 **Instructions:**
 - Upload your assessment CSV with *any* column/total labels, up to 5 header rows, and student records after.
-- Ensure the structure: the first two columns are always Name/Roll, last 5 columns before total are ignored, last column is total marks.
+- Ensure the structure: the first two columns are Name/Roll, question columns, then 5 CO columns (ignored), last column is total marks.
 - Click "Assign Random Marks" and download the result. -- Prof. Priyadarsan Patra
 """)
 
@@ -27,7 +25,7 @@ if uploaded_file:
 
     first_two_cols = [0, 1]
     last_col = n_cols - 1
-    last_5_co_cols = list(range(last_col-5, last_col))
+    last_5_co_cols = list(range(last_col - 5, last_col))
 
     question_start = 2
     question_end = last_col - 5         # exclusive
@@ -42,6 +40,27 @@ if uploaded_file:
         st.error("Error: Could not parse 'max marks' row. Please check that the third header row has integers for maximum marks.")
         st.stop()
 
+    # Robust, always-possible partition function
+    def random_partition_with_upper_bounds(total, max_bounds):
+        n = len(max_bounds)
+        marks = []
+        remaining = total
+        for j in range(n):
+            max_sum_rest = sum(max_bounds[j+1:])
+            lo = max(0, remaining - max_sum_rest)
+            hi = min(max_bounds[j], remaining)
+            if lo > hi:
+                return None
+            if j < n-1:
+                val = random.randint(lo, hi)
+            else:
+                val = remaining
+            marks.append(val)
+            remaining -= val
+        if remaining != 0:
+            return None
+        return marks
+
     output_rows = []
     for i in range(record_start, len(df_raw)):
         row = df_raw.iloc[i]
@@ -53,33 +72,8 @@ if uploaded_file:
             st.warning(f"Could not read total marks for {name} at row {i+1}. Skipping student.")
             continue
 
-        # Random partition in bounds
-        def random_partition_with_upper_bounds(total, max_bounds):
-            n = len(max_bounds)
-            marks = [0]*n
-            remaining = total
-
-            # Shuffle question order (<-- randomness in outcome)
-            indices = list(range(n))
-            random.shuffle(indices)
-            for idx in indices:
-                max_for_rest = sum(max_bounds[j] for j in indices[indices.index(idx)+1:])
-                min_for_this = max(0, remaining - max_for_rest)
-                max_for_this = min(max_bounds[idx], remaining)
-                if max_for_this < min_for_this:
-                    # Impossible
-                    return None
-                val = random.randint(min_for_this, max_for_this)
-                marks[idx] = val
-                remaining -= val
-            return marks if remaining == 0 else None
-
-        # Try generating marks
-        for attempt in range(1000):
-            marks = random_partition_with_upper_bounds(total_marks, max_marks_list)
-            if marks is not None:
-                break
-        else:
+        marks = random_partition_with_upper_bounds(total_marks, max_marks_list)
+        if marks is None:
             st.error(f"Could not generate marks for {name} ({roll}) - skipped.")
             continue
 
@@ -87,7 +81,7 @@ if uploaded_file:
 
     # Column headers
     output_columns = (
-        [df_raw.iloc[0,0], df_raw.iloc[0,1]] +
+        [df_raw.iloc[0, 0], df_raw.iloc[0, 1]] +
         question_labels +
         ["Total Marks"]
     )
