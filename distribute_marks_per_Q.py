@@ -1,15 +1,18 @@
 import streamlit as st
 import pandas as pd
 import os
-import io
 import random
+import io
 
 st.title("Automated Assignment of Marks Per Question")
 
 st.markdown("""
 **Instructions:**
-- Upload your assessment CSV with any column labels, 5 header rows, student data from row 6.
-- First two columns: Name, Roll. Then any number of question columns. Then 5 CO columns (ignored). Last column is total marks.
+- Upload your assessment CSV with any column names (template-agnostic).
+- The first two columns are Name and Roll.
+- Any number of question columns follow; the last 5 columns are ignored (COs/etc), with the final column being total marks.
+- Student records start from row 6.
+- The output file keeps all headers, CO columns, and all input structure, only updating the question marks for each student.
 - File preview limited to 5 or fewer students. -- Prof. Priyadarsan Patra
 """)
 
@@ -21,24 +24,21 @@ if uploaded_file:
     output_filename = f"{base}_filled{ext}"
 
     df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
-    n_cols = df_raw.shape[1]
+    n_rows, n_cols = df_raw.shape
     record_start = 5  # Data starts from 6th row (index 5)
 
-    # Questions: columns 2 to n_cols-5 (exclusive as end in Python -- not counting the last 5 columns)
+    # Determine indices for question columns
     question_start = 2
-    question_end = n_cols - 5
+    question_end = n_cols - 5  # last 5 cols = 5 COs, last col (n_cols-1) = Total
 
-    question_labels = df_raw.iloc[0, question_start:question_end].tolist()
+    # Get per-question max marks from header (assume row 2, index 2)
     try:
-        max_marks_list = pd.to_numeric(
-            df_raw.iloc[2, question_start:question_end].tolist(),
-            errors='raise'
-        ).astype(int).tolist()
+        max_marks_list = pd.to_numeric(df_raw.iloc[2, question_start:question_end], errors="raise").astype(int).tolist()
     except Exception as e:
-        st.error(f"Error: Could not parse 'max marks' row. Please check that the third header row has integers for maximum marks. Details: {e}")
+        st.error(f"Could not parse max marks in header row 3 (index 2). Details: {e}")
         st.stop()
 
-    last_col = n_cols - 1  # Final column is Total
+    last_col = n_cols - 1  # final column: Total
 
     def random_partition_with_upper_bounds(total, max_bounds):
         n = len(max_bounds)
@@ -60,60 +60,50 @@ if uploaded_file:
             return None
         return marks
 
-    output_rows = []
-    for i in range(record_start, len(df_raw)):
-        row = df_raw.iloc[i]
-        name = row[0]
-        roll = row[1]
+    # Create a copy to modify
+    df_out = df_raw.copy()
+
+    output_rows = 0
+    for i in range(record_start, n_rows):
+        row = df_out.iloc[i]
         try:
             total_marks = int(str(row[last_col]).strip())
         except:
-            st.warning(f"Could not read total marks for {name} at row {i+1}. Skipping student.")
+            st.warning(f"Could not read total marks for row {i+1}. Skipping student.")
             continue
 
         max_possible = sum(max_marks_list)
         if total_marks < 0 or total_marks > max_possible:
-            st.warning(f"Total marks {total_marks} for {name} is not possible given question bounds (max {max_possible}). Skipping student.")
+            st.warning(f"Total marks {total_marks} at row {i+1} is impossible (max {max_possible}). Skipping student.")
             continue
 
         marks = random_partition_with_upper_bounds(total_marks, max_marks_list)
         if marks is None:
-            st.error(f"Could not generate marks for {name} ({roll}) - skipped.")
+            st.error(f"Could not generate marks for row {i+1}. Skipped.")
             continue
 
-        output_rows.append([name, roll] + marks + [sum(marks)])
+        # Update only the question columns in df_out for this student
+        for colidx, m in enumerate(marks, start=question_start):
+            df_out.iat[i, colidx] = str(m)
+        # Optionally, update the question total again (if you want to guarantee it matches)
+        df_out.iat[i, last_col] = str(sum(marks))
+        output_rows += 1
 
-    output_columns = (
-        [df_raw.iloc[0, 0], df_raw.iloc[0, 1]] +
-        question_labels +
-        ["Total Marks"]
-    )
-
-    df_result = pd.DataFrame(output_rows, columns=output_columns)
-    num_students = len(df_raw) - record_start
-
+    num_students = n_rows - record_start
     if num_students <= 5:
         st.subheader("Input Student Records")
         st.dataframe(df_raw.iloc[record_start:, :])
-        st.subheader("Output (Assigned Marks)")
-        st.dataframe(df_result)
+        st.subheader("Output (All Columns, Assigned Marks)")
+        st.dataframe(df_out.iloc[record_start:, :])
     else:
         st.info(f"Input and output data not displayed (record count: {num_students}, limit for display: 5)")
 
-
-    # Prepare the header rows (from the original input), as plain text lines
-    # Convert them to comma-separated strings
-    header_rows = df_raw.iloc[:5, :].fillna('').astype(str).values.tolist()
-    header_csv_lines = [','.join(row) for row in header_rows]
-
-    # Prepare CSV output for data
-    student_data_csv = df_result.to_csv(index=False, header=False)
-    # Combine header and assigned marks
-    final_csv = '\n'.join(header_csv_lines) + '\n' + student_data_csv
-       
+    # Save output preserving full original structure
+    out_buf = io.StringIO()
+    df_out.to_csv(out_buf, index=False, header=False)
     st.download_button(
-        label="Download output CSV",
-        data=final_csv,
+        label="Download CSV",
+        data=out_buf.getvalue(),
         file_name=output_filename,
         mime="text/csv"
     )
