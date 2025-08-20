@@ -92,8 +92,16 @@ if uploaded_file:
     )
 
     df_result = pd.DataFrame(output_rows, columns=output_columns)
-    st.subheader("Preview")
-    st.dataframe(df_result)
+    # Number of student records
+    num_students = len(df_raw) - record_start
+
+    if num_students <= 5:
+        st.subheader("Input Student Records")
+        st.dataframe(df_raw.iloc[record_start:, :])
+        st.subheader("Output (Assigned Marks)")
+        st.dataframe(df_result)
+    else:
+        st.info(f"Input and output data not displayed (record count: {num_students}, limit for display: 5)")
 
     st.download_button(
         label="Download CSV",
