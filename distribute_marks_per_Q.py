@@ -5,7 +5,7 @@ import io
 import os
 import random
 
-st.title("Random Assignment of Marks (Template-Agnostic)")
+st.title("Automated Assignment of Marks Per Question")
 
 st.markdown("""
 **Instructions:**
@@ -15,11 +15,12 @@ st.markdown("""
 """)
 
 uploaded_file = st.file_uploader("Upload the input CSV", type=["csv"])
-input_filename = uploaded_file.name
-base, ext = os.path.splitext(input_filename)
-output_filename = f"{base}_filled{ext}"
 
 if uploaded_file:
+    input_filename = uploaded_file.name
+    base, ext = os.path.splitext(input_filename)
+    output_filename = f"{base}_filled{ext}"
+
     df_raw = pd.read_csv(uploaded_file, header=None)
     n_cols = df_raw.shape[1]
     record_start = 5                    # Student records start from row 5 (0-based)
