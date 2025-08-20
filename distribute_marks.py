@@ -6,13 +6,14 @@ from scipy.optimize import linprog
 
 st.set_page_config(page_title="Robust Assessment Mark Allocator (Strict Sum)", layout="centered")
 
-st.title("Robust Student Assessment Mark Allocator (Partial Filling, Guaranteed Sum)")
+st.title("Robust Student Assessment Mark Allocator (Partial Filling, Guaranteed Sum, 60% Cap for <35)")
 
 st.markdown("""
 Upload your **Marking Scheme** and **Student Records** as CSV files.
+
 ---
 ##ProPatra## <u>**Hard Constraints (Enforced):**</u>
-- Each assessment mark between 30% & 100% (if total ≥ 35), else 0 to 100%.
+- Each assessment mark between 30% & 100% (if total ≥ 35), else between 0 and **60% of max** (if total < 35).
 - Pre-filled assessment marks in student file are strictly kept as fixed.
 - Sum of all weighted assessment marks matches "Total Marks out of 100" for each student (matching within ±0.5 due to rounding).
 - Any infeasible row (where fixed + possible free marks can't reach total) is flagged, and missing marks left blank.
@@ -41,7 +42,7 @@ student_record_sample = (
     "Student 3,82,?,?,?,?,?,?,?,?\n"
     "Student 4,55,?,?,18,?,?,?,?,?\n"
     "Student 5,77,12,?,30,18,?,?,?,?,?\n"
-    "Student 6,95,?,?,?,15,?,?,?,?\n"
+    "Student 6,30,?,?,?,?,?,?,?,?\n"
 )
 
 st.subheader("Step 1: Upload Marking Scheme CSV")
@@ -117,7 +118,6 @@ if scheme_file:
             # Find End-Sem index among to_fill (NOT global!)
             if any("end-semester" in assessments[i].lower() for i in to_fill):
                 end_sem_local = [j for j, i in enumerate(to_fill) if "end-semester" in assessments[i].lower()][0]
-                # max value for endsem: no more than (total/100) × max, or original upper
                 endsem_cap = min(mx[end_sem_local], (total / 100) * mx[end_sem_local])
                 maxm[end_sem_local] = max(endsem_cap, minm[end_sem_local])
             # constraints: minm ≤ x ≤ maxm; sum_i (x_i / mx_i) * wts_i == needed_total
@@ -134,9 +134,8 @@ if scheme_file:
             if remaining_total < min_possible - 1e-6 or remaining_total > max_possible + 1e-6:
                 return None  # infeasible
 
-            # Try a "random feasible int" approach using LP + integer adjustment loop
-            # Solve LP for real numbers
-            c = np.random.rand(len(to_fill))  # random obj, for soft bias
+            # Try a random int rounding approach using LP + integer adjustment loop
+            c = np.random.rand(len(to_fill))
             A_eq = [(wts / mx).tolist()]
             b_eq = [remaining_total]
             bounds = [(float(minm[i]), float(maxm[i])) for i in range(len(to_fill))]
@@ -152,7 +151,6 @@ if scheme_file:
             x = lp.x
             # Now: round to integers & adjust
             int_best = np.round(x)
-            # Repeat search if needed (try small noise, then fix sum)
             def sum_from(v):
                 return np.sum((v / mx) * wts)
             weighted = sum_from(int_best)
@@ -160,14 +158,12 @@ if scheme_file:
             if abs(delta) <= 0.51:
                 filled_vals = int_best.astype(int)
             else:
-                # Simple greedy correction: add/remove points on least/fewest-weighted fields
-                # Try adding/subtracting one mark at a time to bring it within 0.5
+                # Simple greedy correction: add/remove marks on least/fewest-weighted fields
                 done = False
                 for sign in [1, -1]:
                     for idx in np.argsort(wts / mx):
                         seq = int_best.copy()
                         seq[idx] += sign
-                        # stay within bounds!
                         if seq[idx] < minm[idx] or seq[idx] > maxm[idx]:
                             continue
                         test_weighted = sum_from(seq)
@@ -211,15 +207,17 @@ if scheme_file:
                 else:
                     free_indices.append(i)
 
-            # Min marks logic
+            # ******** SPECIAL CONSTRAINTS FOR LOW MARKS *********
             if total < 35:
                 minmarks_row = np.zeros_like(minmarks_standard)
+                maxmarks_row = np.floor(0.6 * maxmarks)
             else:
                 minmarks_row = minmarks_standard.copy()
+                maxmarks_row = maxmarks.copy()
 
-            # Use marks_given_total_hard for partial
+            # Use function with per-student min/max
             marks = marks_given_total_hard(
-                total, N, minmarks_row, maxmarks, weights, maxmarks, alphas, assessments, fixed=fixed
+                total, N, minmarks_row, maxmarks_row, weights, maxmarks, alphas, assessments, fixed=fixed
             )
 
             if marks is None:
@@ -229,12 +227,11 @@ if scheme_file:
                 for i, val in fixed.items():
                     filled_df.at[idx, assessments[i]] = val
                 continue
-            # Done: fill all
             for i, val in enumerate(marks):
                 filled_df.at[idx, assessments[i]] = int(round(val))
             filled_df.at[idx, "Remarks"] = ""
 
-            # Verify sum matches required total (debug/guarantee, for transparency)
+            # Verify sum matches required total
             weightedsum = np.sum(
                 (np.array([float(filled_df.at[idx, a]) for a in assessments]) / maxmarks) * weights
             )
@@ -242,6 +239,14 @@ if scheme_file:
                 filled_df.at[idx, "Remarks"] = (
                     f"BUG: Refused to match total (got {weightedsum:.2f} vs requested {total} after rounding)"
                 )
+
+            # STRICT: For total<35, no component may be >60% of max
+            if total < 35:
+                for i, a in enumerate(assessments):
+                    if float(filled_df.at[idx, a]) > 0.6 * maxmarks[i]:
+                        filled_df.at[idx, "Remarks"] = (
+                            f"BUG: For total<35, some component >60% max: {a}={filled_df.at[idx,a]}"
+                        )
 
         st.success("✅ Assessment marks distributed (all constraints enforced):")
         if len(filled_df) <= 5:
