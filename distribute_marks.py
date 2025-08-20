@@ -42,9 +42,9 @@ marking_scheme_sample = (
 )
 student_record_sample = (
     "Marks Distributed,Total Marks out of 100,Assignment - 1,Quiz - 1,Mid-Term,Assignment - 2,Quiz - 2,Surprise Test,Attendance,End-Semester Exam\n"
-    "Student 1,75,?,?,?,?,?,?,?,?\n"
-    "Student 2,32,?,?,?,?,?,?,?,?\n"
-    "Student 3,82,?,?,?,?,?,?,?,?\n"
+    "Student 1,75,,,,,,,,\n"
+    "Student 2,32,,,,,,,,\n"
+    "Student 3,82,,,,,,,,\n"
 )
 
 st.subheader("Step 1: Upload Marking Scheme CSV")
