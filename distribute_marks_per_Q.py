@@ -8,7 +8,7 @@ st.title("Automated Assignment of Marks Per Question")
 
 st.markdown("""
 **Instructions:**
-- Upload your assessment CSV with any column labels, 3 header rows, student data from row 6.
+- Upload your assessment CSV with any column labels, 4 header rows, student data from row 6.
 - First two columns: Name, Roll. Then any number of question columns. Then 5 CO columns (ignored). Last column is total marks.
 - File preview limited to 5 or fewer students. -- Prof. Priyadarsan Patra
 """)
@@ -22,7 +22,7 @@ if uploaded_file:
 
     df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
     n_cols = df_raw.shape[1]
-    record_start = 3  # Data starts from 6th row (index 3)
+    record_start = 4  # Data starts from 5th row (index 4)
 
     # Questions: columns 2 to n_cols-5 (exclusive as end in Python -- not counting the last 5 columns)
     question_start = 2
@@ -103,7 +103,7 @@ if uploaded_file:
 
     # Prepare the header rows (from the original input), as plain text lines
     # Convert them to comma-separated strings
-    header_rows = df_raw.iloc[:3, :].fillna('').astype(str).values.tolist()
+    header_rows = df_raw.iloc[:4, :].fillna('').astype(str).values.tolist()
     header_csv_lines = [','.join(row) for row in header_rows]
 
     # Prepare CSV output for data
