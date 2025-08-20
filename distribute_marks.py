@@ -1,31 +1,31 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from scipy.optimize import linprog
 import os
+from scipy.optimize import linprog
 
 st.set_page_config(page_title="Randomized Student Assessment Mark Allocator", layout="centered")
 
-st.title("Randomized Student Assessment Mark Allocator (with Flexible Min Marks)")
+st.title("Randomized Student Assessment Mark Allocator (Flexible/Partial Filling)")
 
 st.markdown("""
 Upload your **Marking Scheme** and **Student Records** as CSV files.
 
 ---
 
-#### <u>**Hard Constraints (Enforced):**</u>
+#### <u>**Hard Constraints:**</u>
 - **If “Total Marks out of 100” ≥ 35:**  
-    Each assessment mark is between **30%** (minimum) and **100%** (maximum) of its max marks.
+    Each assessment mark is between **30%** (min) and **100%** (max).
 - **If “Total Marks out of 100” < 35:**  
-    The 30% minimum per assignment is *waived* (assessments can be zero).
+    The 30% minimum per assessment is *waived* (can be zero).
+- Any non-empty entries for a student in a component **are retained and never overwritten**.
 - For every student:  
     **End-Semester Exam marks (%) ≤ their Total Marks (%)**.
-- The **weighted sum** of assessment marks (as per the scheme) matches their “Total Marks out of 100”.
+- The **weighted sum** matches their “Total Marks out of 100”.
 <br>
-#### <u>**Soft Constraints (Bias in Randomization):**</u>
-- Attendance marks are **more likely high**.
-- End-Semester Exam marks are **less likely high** (except as needed to satisfy overall constraints).
-
+#### <u>**Soft Constraints (Randomization Bias):**</u>
+- Attendance marks tend to be high, End-Sem marks tend to be lower, all else random.
+*Any field left empty for a student record will be filled with values within the constraints.
 ---
 """, unsafe_allow_html=True)
 
@@ -42,9 +42,12 @@ marking_scheme_sample = (
 )
 student_record_sample = (
     "Marks Distributed,Total Marks out of 100,Assignment - 1,Quiz - 1,Mid-Term,Assignment - 2,Quiz - 2,Surprise Test,Attendance,End-Semester Exam\n"
-    "Student 1,75,,,,,,,,\n"
-    "Student 2,32,,,,,,,,\n"
-    "Student 3,82,,,,,,,,\n"
+    "Student 1,75,?,?,?,40,37,?,?,?\n"
+    "Student 2,32,?,?,?,?,?,?,?,?\n"
+    "Student 3,82,?,?,?,?,?,?,?,?\n"
+    "Student 4,55,?,?,18,?,?,?,?,?\n"
+    "Student 5,77,12,?,30,18,?,?,?,?,?\n"
+    "Student 6,65,?,?,?,38,?,?,?,?,?\n"
 )
 
 st.subheader("Step 1: Upload Marking Scheme CSV")
@@ -71,11 +74,6 @@ if scheme_file:
     records_file = st.file_uploader("Upload Student Records", type="csv", key="students")
 
     if records_file:
-        # ... inside the main part of your script, after records_file is uploaded:
-        input_filename = records_file.name
-        base, ext = os.path.splitext(input_filename)
-        output_filename = f"{base}_filled{ext}"
-
         stu_df = pd.read_csv(records_file)
         stu_df.columns = [c.strip() for c in stu_df.columns]
         assess_missing = [a for a in assessments if a not in stu_df.columns]
@@ -85,15 +83,13 @@ if scheme_file:
         if "Total Marks out of 100" not in stu_df.columns:
             st.error("Missing column: 'Total Marks out of 100' in student file.")
             st.stop()
-
         st.write("**Loaded student records:**")
         if len(stu_df) <= 5:
             st.dataframe(stu_df)
         else:
             st.info(f"Student records file has {len(stu_df)} records (not displaying table for brevity).")
 
- 
-        # --- Dirichlet bias for soft constraints
+        # Dirichlet soft constraint alpha per assessment
         alphas = []
         for a in assessments:
             if a.lower().strip() == "attendance":
@@ -121,7 +117,6 @@ if scheme_file:
             minfrac = minmarks_cur / maxmarks_vec
             maxfrac = maxmarks_cur / maxmarks_vec
             for _ in range(1000):
-                # Small per-student randomization of alpha vector
                 dirichlet_bias = np.random.uniform(0.85, 1.15, size=len(alphas))
                 alphas_this_student = np.array(alphas) * dirichlet_bias
                 direction = np.random.dirichlet(alphas_this_student)
@@ -146,7 +141,7 @@ if scheme_file:
                     and np.abs(weighted - total) < 0.51
                 ):
                     return marks_int.astype(int)
-            # Fallback: LP with these constraints
+            # Fallback on LP
             c = np.random.rand(N)
             A_eq = [(weights / maxmarks_vec).tolist()]
             b_eq = [total]
@@ -173,22 +168,62 @@ if scheme_file:
         N = len(assessments)
         for idx, row in filled_df.iterrows():
             total = float(row['Total Marks out of 100'])
-            # Waive per-assessment minimum if total < 35
+            # Figure out which assessments are fixed vs to fill:
+            fixed_indices = []
+            free_indices = []
+            fixed_marks = []
+            for i, a in enumerate(assessments):
+                v = row[a]
+                if pd.notnull(v) and str(v).strip() not in {"", "?"}:
+                    fixed_indices.append(i)
+                    fixed_marks.append(float(v))
+                else:
+                    free_indices.append(i)
+            # Min-marks review
             if total < 35:
                 minmarks_row = np.zeros_like(minmarks_standard)
             else:
                 minmarks_row = minmarks_standard.copy()
-            marks = marks_given_total(
-                total, N, minmarks_row, maxmarks, weights, maxmarks, alphas, assessments
-            )
-            for a, m in zip(assessments, marks):
-                filled_df.at[idx, a] = int(m)
+            # For only free variables
+            weights_free = weights[free_indices]
+            maxmarks_free = maxmarks[free_indices]
+            minmarks_free = minmarks_row[free_indices]
+            assessments_free = [assessments[i] for i in free_indices]
+            alphas_free = [alphas[i] for i in free_indices]
+
+            # How much of the required total is already "spent" on the fixed assessments?
+            fixed_total_contribution = 0.0
+            for j, i in enumerate(fixed_indices):
+                fixed_total_contribution += (fixed_marks[j] / maxmarks[i]) * weights[i]
+            remaining_total = total - fixed_total_contribution
+
+            # Special: If all records fixed, just keep as is
+            if len(free_indices) == 0:
+                for n, i in enumerate(fixed_indices):
+                    filled_df.at[idx, assessments[i]] = int(fixed_marks[n])
+            else:
+                # Solve for remaining free marks
+                marks_free = marks_given_total(
+                    remaining_total, len(free_indices), minmarks_free, maxmarks_free,
+                    weights_free, maxmarks_free, alphas_free, assessments_free
+                )
+                # Fill generated marks
+                for n, i in enumerate(free_indices):
+                    filled_df.at[idx, assessments[i]] = int(marks_free[n])
+                # Also output fixed (for cleanliness/force integer)
+                for n, i in enumerate(fixed_indices):
+                    filled_df.at[idx, assessments[i]] = int(fixed_marks[n])
 
         st.success("✅ Assessment marks distributed (all constraints enforced):")
         if len(filled_df) <= 5:
             st.dataframe(filled_df)
         else:
             st.info(f"Generated file has {len(filled_df)} student records (not displaying table for brevity).")
+
+        input_filename = records_file.name if records_file is not None else "filled_student_marks.csv"
+        base, ext = os.path.splitext(input_filename)
+        output_filename = f"{base}_filled{ext}"
+
         st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name=output_filename)
     else:
         st.info("Upload student records file to continue.")
