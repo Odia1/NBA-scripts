@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.optimize import linprog
+import os
 
 st.set_page_config(page_title="Randomized Student Assessment Mark Allocator", layout="centered")
 
@@ -70,6 +71,11 @@ if scheme_file:
     records_file = st.file_uploader("Upload Student Records", type="csv", key="students")
 
     if records_file:
+        # ... inside the main part of your script, after records_file is uploaded:
+        input_filename = records_file.name
+        base, ext = os.path.splitext(input_filename)
+        output_filename = f"{base}_filled{ext}"
+
         stu_df = pd.read_csv(records_file)
         stu_df.columns = [c.strip() for c in stu_df.columns]
         assess_missing = [a for a in assessments if a not in stu_df.columns]
@@ -179,7 +185,7 @@ if scheme_file:
                 filled_df.at[idx, a] = int(m)
         st.success("✅ Assessment marks distributed (all constraints enforced):")
         st.dataframe(filled_df)
-        st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name="filled_student_marks.csv")
+        st.download_button("Download filled results as CSV", filled_df.to_csv(index=False), file_name=output_filename")
     else:
         st.info("Upload student records file to continue.")
 else:
