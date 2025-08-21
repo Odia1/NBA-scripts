@@ -34,7 +34,7 @@ st.download_button(
    file_name="input_file_template.csv",
    mime="text/csv",
 )
-st.markdown(""" Authored by Prof. Priyadarsan Patra""")
+st.write("_--Authored by Prof. Priyadarsan Patra_")
 st.divider()
 
 # User choice widget is now always visible
