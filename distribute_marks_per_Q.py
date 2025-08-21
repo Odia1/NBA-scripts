@@ -4,14 +4,16 @@ import random
 import os
 import io
 
-st.title("Assignment of Marks (Choose n out of m, Always Solution)")
+st.title("Assignment of Marks from a total")
 
 st.markdown("""
 - The first row: SectionMax,Required,...
-- The third header row (`Mark Per Que` in row 2) is per-question maxima.
+- The 4th header row (`Mark Per Que` in row 3) is per-question maxima.
 - For each section, only `Required` number of questions get marks; others get zero.
 - Marks are integers if possible (for integer maxima), else half marks allowed.
-- Student records start at row 6.
+- The student's total marks column is the last (5th after question columns end) column.
+-The values in Blooms Taxonomy and CO rows and columns are ignored.
+- Student records start at row 6.    --Prof. Priyadrsan Patra
 """)
 
 uploaded_file = st.file_uploader("Upload the input CSV", type=["csv"])
@@ -104,7 +106,7 @@ if uploaded_file:
             df_raw.iloc[3, question_start:question_end].tolist(), errors='raise'
         ).tolist()
     except Exception as e:
-        st.error(f"Could not parse max marks in row 3. Details: {e}")
+        st.error(f"Could not parse max marks in row 4. Details: {e}")
         st.stop()
 
     last_col = n_cols - 1  # final column: Total
