@@ -4,104 +4,61 @@ import random
 import os
 import io
 
-st.title("Automated Assignment of Marks Per Section Constraints")
+st.title("Assignment of Marks (Choose n out of m, Always Solution)")
 
 st.markdown("""
-**Instructions:**
-- The first row must be the "SectionMax,Required,..." row, describing for each section: (#questions in section, #student must answer).
-- The third header row (index=2) is per-question mark maxima, which may be floats or ints.
-- For each section: if all maxima are integers, only integer marks are assigned. If any maxima are fractional, assigned marks may be multiples of 0.5.
-- Columns after questions (like CO, etc.) are left untouched.
-- Student records start at row 6.  --Prof. Priyadarsan Patra
+- The first row: SectionMax,Required,...
+- The third header row (`Mark Per Que` in row 2) is per-question maxima.
+- For each section, only `Required` number of questions get marks; others get zero.
+- Marks are integers if possible (for integer maxima), else half marks allowed.
+- Student records start at row 6.
 """)
 
 uploaded_file = st.file_uploader("Upload the input CSV", type=["csv"])
 
 def is_all_integral(arr):
-    """Test if all elements are integer-valued."""
     return all(abs(x - int(x)) < 1e-6 for x in arr)
 
-def random_partition_with_step_always_fill(total, per_q_max, choose, step):
+def greedy_partition(total, per_q_max, choose, step):
     """
-    Partition total among choose questions, at most per_q_max each,
-    nonzero marks only for randomly chosen `choose` questions, zeros for rest.
-    Each assigned mark is a multiple of `step`.
-    Guaranteed to assign zeros for not-chosen.
+    Partition 'total' among 'choose' randomly selected questions (rest get 0),
+    with each assigned at most per_q_max[i], using largest-remaining-fit,
+    marks are multiples of step (1 or 0.5).
+    Guaranteed to succeed if possible.
     """
     n = len(per_q_max)
     steps = int(round(1/step))
     int_total = int(round(total * steps))
-    int_max_bounds = [int(round(m * steps)) for m in per_q_max]
+    int_per_q_max = [int(round(m * steps)) for m in per_q_max]
 
     req = int(choose)
-    # If choose >= n, assign marks to all
+    result = [0.0] * n
+    # Select which questions to answer
     if req >= n:
-        chosen_indices = list(range(n))
+        indices = list(range(n))
     else:
-        chosen_indices = sorted(random.sample(range(n), req))
-    max_selected = [int_max_bounds[i] for i in chosen_indices]
-    # can the total be distributed at all?
+        indices = sorted(random.sample(range(n), req))
+
+    max_selected = [int_per_q_max[i] for i in indices]
+    # Not possible? Return None
     if int_total > sum(max_selected):
         return None
 
-    # Partition int_total among chosen_indices
-    vals = []
+    vals = [0]*req
     remaining = int_total
-    for j in range(req):
-        max_sum_rest = sum(max_selected[j+1:])
-        lo = max(0, remaining - max_sum_rest)
-        hi = min(max_selected[j], remaining)
-        if lo > hi:
-            return None
-        if j < req - 1:
-            val = random.randint(lo, hi)
-        else:
-            val = remaining
-        vals.append(val)
-        remaining -= val
-    if remaining != 0:
-        return None
-    result = [0.0] * n
-    for idx, v in zip(chosen_indices, vals):
-        result[idx] = v / steps
-    return result
-
-def random_partition_with_step(total, per_q_max, choose, step):
-    """
-    Partition total among choose questions, at most per_q_max each,
-    with each assigned mark being a multiple of step (0.5 or 1).
-    Only nonzero marks for chosen questions.
-    """
-    n = len(per_q_max)
-    steps = int(round(1/step))
-    int_total = int(round(total * steps))
-    int_max_bounds = [int(round(m * steps)) for m in per_q_max]
-
-    req = int(choose)
-    if req == 0:
-        if abs(total) < 1e-5:
-            return [0.0] * n
-        return None
-
-    indices = sorted(random.sample(range(n), req))
-    max_selected = [int_max_bounds[i] for i in indices]
-    remaining = int_total
-    vals = []
-    for j in range(req):
-        max_sum_rest = sum(max_selected[j+1:])
-        lo = max(0, remaining - max_sum_rest)
-        hi = min(max_selected[j], remaining)
-        if lo > hi:
-            return None
-        if j < req - 1:
-            val = random.randint(lo, hi)
-        else:
-            val = remaining
-        vals.append(val)
-        remaining -= val
-    if remaining != 0:
-        return None
-    result = [0.0] * n
+    # Largest-fit first (so as many as possible get full marks)
+    order = sorted(range(req), key=lambda x: -max_selected[x])
+    for j in order:
+        can_give = min(max_selected[j], remaining)
+        vals[j] = can_give
+        remaining -= can_give
+    # Spread anything left (should not be, but robust)
+    j = 0
+    while remaining > 0:
+        to_add = min(max_selected[j] - vals[j], remaining)
+        vals[j] += to_add
+        remaining -= to_add
+        j = (j + 1) % req
     for idx, v in zip(indices, vals):
         result[idx] = v / steps
     return result
@@ -114,9 +71,9 @@ if uploaded_file:
     df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
     n_rows, n_cols = df_raw.shape
 
-    # --- Parse Sections information ---
+    # Parse Sections
     section_row = df_raw.iloc[0].fillna('')
-    sec_info = section_row.tolist()[2:]  # Skip first 2 (SectionMax,Required)
+    sec_info = section_row.tolist()[2:]
     sections = []
     i = 0
     while i < len(sec_info):
@@ -132,21 +89,20 @@ if uploaded_file:
             break
 
     # Compute question col index ranges for each section
-    question_start = 2  # Questions start at col 2
+    question_start = 2
     question_ranges = []
     cur = question_start
     for sec in sections:
         rng = (cur, cur + sec["count"])  # end exclusive
         question_ranges.append(rng)
-        cur += sec["count"]  # move to next
+        cur += sec["count"]  # next
     question_end = cur   # first col after last question
 
-    # --- Build per-question maxima for all questions ---
+    # Build per-question maxima for all questions
     try:
         max_marks_all = pd.to_numeric(
-            df_raw.iloc[2, question_start:question_end].tolist(),
-            errors='raise'
-        ).tolist()  # floats
+            df_raw.iloc[2, question_start:question_end].tolist(), errors='raise'
+        ).tolist()
     except Exception as e:
         st.error(f"Could not parse max marks in row 3. Details: {e}")
         st.stop()
@@ -154,17 +110,17 @@ if uploaded_file:
     last_col = n_cols - 1  # final column: Total
     record_start = 5
 
-    # Precompute for each section: which step is allowed
+    # Precompute for each section: 'step' and 'per-q max'
     section_steps = []
     section_maxima = []
     s_cur = 0
     for sec in sections:
         per_q = max_marks_all[s_cur:s_cur+sec['count']]
+        section_maxima.append(per_q)
         if is_all_integral(per_q):
             section_steps.append(1)    # integer-only
         else:
             section_steps.append(0.5)  # allow half-marks
-        section_maxima.append(per_q)
         s_cur += sec['count']
 
     df_out = df_raw.copy()
@@ -173,68 +129,52 @@ if uploaded_file:
         try:
             total_marks = float(str(row[last_col]).strip())
             if pd.isna(total_marks):
-                raise ValueError("NaN total")
-        except Exception as e:
+                continue
+        except:
             continue
 
-        # For each section, determine per-q maxima, choose, and step
         marks_all_sections = []
         ok = True
-        # First, for all but last section, randomly pick the per-section total
-        max_for_section = []
-        for m, sec in zip(section_maxima, sections):
-            max_for_section.append(sum(sorted(m, reverse=True)[:sec["choose"]]))
-        total_max = sum(max_for_section)
+        total_max = sum(
+            sum(sorted(section_maxima[secidx], reverse=True)[:sections[secidx]['choose']])
+            for secidx in range(len(sections))
+        )
         if total_marks < 0 or total_marks > total_max + 1e-6:
             ok = False
-        # Randomly split total_marks among sections, respecting per-section maxima
-        attempts = 800
-        success = False
-        for _ in range(attempts):
-            splits = []
-            sr = len(sections)
-            # For even splitting using least step size so sum matches
-            step_all = min(section_steps)
-            all_steps = [int(round(1/st)) for st in section_steps]
-            max_s = [int(round(m*st)) for m, st in zip(max_for_section, all_steps)]
-            rem = int(round(total_marks * min(all_steps))) # use smallest granularity for section split
-            for j in range(sr):
-                max_sum_rest = sum(max_s[j+1:])
-                lo = max(0, rem - max_sum_rest)
-                hi = min(max_s[j], rem)
-                if lo > hi:
-                    ok = False
-                    break
-                if j < sr - 1:
-                    val = random.randint(lo, hi)
-                else:
-                    val = rem
-                splits.append(val / all_steps[j])
-                rem -= val
-            if not ok:
-                continue
-            # Now, assign to each section
-            marks_all_sections = []
-            for sec_idx, (start, end) in enumerate(question_ranges):
-                per_q_max = section_maxima[sec_idx]
-                req = sections[sec_idx]['choose']
-                sec_total = splits[sec_idx]
-                step = section_steps[sec_idx]
-                marks = random_partition_with_step_always_fill(sec_total, per_q_max, req, step)
-                if marks is None:
-                    ok = False
-                    break
-                marks_all_sections += marks
 
-            if ok and len(marks_all_sections) == question_end - question_start:
-                for k, m in enumerate(marks_all_sections):
-                    df_out.iat[i, question_start + k] = str(int(m) if is_all_integral([m]) else m)
-                df_out.iat[i, last_col] = str(round(sum(marks_all_sections), 2))
-                success = True
+        # For each section, assign as much as you can to each, as possible
+        remainder = total_marks
+        all_marks = []
+        for secidx, (start, end) in enumerate(question_ranges):
+            per_q_max = section_maxima[secidx]
+            req = sections[secidx]['choose']
+            step = section_steps[secidx]
+            sec_max = sum(sorted(per_q_max, reverse=True)[:req])
+            sec_take = min(sec_max, remainder)
+            marks = greedy_partition(sec_take, per_q_max, req, step)
+            if marks is None:
+                ok = False
                 break
-        if not success:
+            all_marks += marks
+            remainder -= sum(marks)
+        # If due to rounding there is a tiny remainder (e.g., 0.5 left), add it to one of the max
+        if ok and abs(remainder) > 1e-5:
+            # Try to assign remainder to any eligible
+            for idx in range(len(all_marks)):
+                step = section_steps[0]  # All steps are 1 in your sample, so this is fine
+                per_q_max = max_marks_all[idx]
+                if all_marks[idx] + remainder <= per_q_max + 1e-5:
+                    all_marks[idx] += remainder
+                    break
+        if not ok or not all(abs(x - int(x)) < 1e-5 or abs((x * 2) - int(x * 2)) < 1e-5 for x in all_marks):
             st.error(f"Could not generate marks for row {i+1} (total={total_marks}). Skipped.")
             continue
+        for k, m in enumerate(all_marks):
+            if is_all_integral([m]):
+                df_out.iat[i, question_start + k] = str(int(round(m)))
+            else:
+                df_out.iat[i, question_start + k] = str(m)
+        df_out.iat[i, last_col] = str(round(sum(all_marks), 2))
 
     num_students = n_rows - record_start
     if num_students <= 5:
