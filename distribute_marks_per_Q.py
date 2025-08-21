@@ -20,8 +20,8 @@ st.markdown("""
 # User choice widget is now always visible
 mark_granularity = st.radio(
     "Allow partial marks (multiples of 0.5)?",
-    ("Yes", "No"),
-    horizontal=False,
+    ("No", "Yes"),
+    horizontal=True,
     key="granularity_choice" # Added a key here for good practice
 )
 
