@@ -21,7 +21,7 @@ st.markdown("""
 mark_granularity = st.radio(
     "Allow partial marks (multiples of 0.5)?",
     ("Yes", "No"),
-    horizontal=True,
+    horizontal=False,
     key="granularity_choice" # Added a key here for good practice
 )
 
