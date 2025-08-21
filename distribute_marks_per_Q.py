@@ -17,7 +17,6 @@ st.markdown("""
 - Student records start at row 6.    --Prof. Priyadrsan Patra
 """)
 #The script now **supports pre-filled marks**. Leave a question's cell empty to have it auto-filled.
-
 # --- Template Download Section ---
 st.subheader("Download Template if desired")
 template_csv_string = """SectionMax,Choose,10,10,12,8,3,2,,,,,,,,,,,,,,,,,,,,,,,,
@@ -30,11 +29,12 @@ Ms. First,202181001,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,81
 H.  Man,202160002,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,55
 """
 st.download_button(
-   label="Download Input Template (.csv)",
+   label="Download Template (.csv)",
    data=template_csv_string,
    file_name="input_file_template.csv",
    mime="text/csv",
 )
+st.markdown(""" Authored by Prof. Priyadarsan Patra""")
 st.divider()
 
 # User choice widget is now always visible
