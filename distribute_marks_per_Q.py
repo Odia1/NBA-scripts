@@ -4,7 +4,7 @@ import random
 import os
 import io
 
-st.title("Assignment of Marks from a total")
+st.title("Assignment of Marks from a total with CO score computed")
 
 st.markdown("""
 - The first row specifies a number of sections as (NumQuesInSection,RequiredToAnswer) pairs.
@@ -12,10 +12,9 @@ st.markdown("""
 - For each section, only `Required` number of questions get marks; others get zero.
 - Marks are integers if possible (for integer maxima), else half marks allowed. Choose if half-marks allowed. Partial Marks allowed for a question.
 - The student's total marks column is the last (5th after question columns end) column.
--The values in Blooms Taxonomy and CO rows and columns are ignored.
+-Row5 maps COs to questions. The values in Blooms Taxonomy is ignored.
 - Student records start at row 6.    --Prof. Priyadrsan Patra
 """)
-
 
 # User choice widget is now always visible
 mark_granularity = st.radio(
@@ -25,7 +24,8 @@ mark_granularity = st.radio(
     key="granularity_choice" # Added a key here for good practice
 )
 
-# Apply the key fix to the file uploader
+
+# File uploader with a unique key to prevent errors
 uploaded_file = st.file_uploader("Upload the input CSV", type=["csv"], key="file_uploader")
 
 def partition_with_steps(total, per_q_max, choose, step_size):
@@ -74,18 +74,38 @@ def partition_with_steps(total, per_q_max, choose, step_size):
     return result
 
 if uploaded_file:
-    # Determine step size from user input
     step_size = 0.5 if mark_granularity == "Yes" else 1.0
-
-    input_filename = uploaded_file.name
-    base, ext = os.path.splitext(input_filename)
-    output_filename = f"{base}_filled{ext}"
 
     df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
     n_rows, n_cols = df_raw.shape
 
+    # --- Parse Template Structure ---
+    header_row = df_raw.iloc[1].str.strip().tolist()
+    
+    # Find start and end of question columns dynamically
+    question_start_col = 2  # Assuming 'Name' and 'Roll No' are first two
+    try:
+        first_co_col_index = header_row.index('CO1')
+        question_end_col = first_co_col_index
+    except ValueError:
+        st.error("Could not find 'CO1' in the header row (Row 2). Please check the template.")
+        st.stop()
+        
+    num_questions = question_end_col - question_start_col
+
+    # --- NEW: Parse CO Mapping and Find CO Column Indices ---
+    try:
+        co_mapping = df_raw.iloc[4, question_start_col:question_end_col].str.strip().tolist()
+        
+        co_labels = sorted(list(set(co_mapping))) # Find unique COs like ['CO1', 'CO2', ...]
+        co_column_indices = {label: header_row.index(label) for label in co_labels if label in header_row}
+    except Exception as e:
+        st.error(f"Error parsing CO mapping from Row 5 or finding CO columns. Details: {e}")
+        st.stop()
+
+    # --- Parse Sections ---
     section_row = df_raw.iloc[0].fillna('')
-    sec_info = section_row.tolist()[2:]
+    sec_info = section_row.tolist()[1:] # Start from second element
     sections = []
     i = 0
     while i < len(sec_info):
@@ -99,35 +119,23 @@ if uploaded_file:
         except (ValueError, IndexError):
             break
 
-    question_start = 2
-    question_ranges = []
-    cur = question_start
-    for sec in sections:
-        rng = (cur, cur + sec["count"])
-        question_ranges.append(rng)
-        cur += sec["count"]
-    question_end = cur
-
+    # --- Parse Max Marks per Question (Row 4) ---
     try:
         max_marks_all = pd.to_numeric(
-            df_raw.iloc[3, question_start:question_end].tolist(), errors='raise'
+            df_raw.iloc[3, question_start_col:question_end_col].tolist(), errors='raise'
         ).tolist()
     except Exception as e:
         st.error(f"Error parsing max marks in Row 4 (index 3). Details: {e}")
         st.stop()
-
-    section_maxima = []
-    cursor = 0
-    for sec in sections:
-        per_q = max_marks_all[cursor : cursor + sec['count']]
-        section_maxima.append(per_q)
-        cursor += sec['count']
-
+    
+    section_maxima = [max_marks_all] # Simpler for this template
+    
+    # --- Process Student Records ---
     last_col = n_cols - 1
-    record_start = 5
+    record_start_row = 6
     df_out = df_raw.copy()
 
-    for i in range(record_start, n_rows):
+    for i in range(record_start_row, n_rows):
         row = df_out.iloc[i]
         try:
             name = str(row[0]).strip()
@@ -137,45 +145,51 @@ if uploaded_file:
         except (ValueError, IndexError):
             continue
 
-        remaining_total = total_marks
         marks_for_student = []
         possible = True
-
-        for sec_idx in range(len(sections)):
-            per_q_max = section_maxima[sec_idx]
-            req = sections[sec_idx]['choose']
-
-            max_for_section = sum(sorted(per_q_max, reverse=True)[:req])
-            marks_to_allocate = min(remaining_total, max_for_section)
-
-            # Round the allocated marks to the nearest valid step
-            marks_to_allocate = round(marks_to_allocate / step_size) * step_size
-
-            section_marks = partition_with_steps(marks_to_allocate, per_q_max, req, step_size)
-
-            if section_marks is None:
-                possible = False
-                break
-
-            marks_for_student.extend(section_marks)
-            remaining_total -= sum(section_marks)
-
-        if not possible or abs(remaining_total) > 1e-6:
+        
+        # This template seems to have only one section
+        sec = sections[0]
+        per_q_max = section_maxima[0]
+        
+        section_marks = partition_with_steps(total_marks, per_q_max, sec['choose'], step_size)
+        
+        if section_marks is None:
             st.error(f"Could not generate marks for student in row {i+1} ({name}) with total {total_marks}. Skipped.")
             continue
-
+        
+        marks_for_student.extend(section_marks)
+        
+        # Write question marks to DataFrame
         for k, m in enumerate(marks_for_student):
-            df_out.iat[i, question_start + k] = str(int(m)) if m == int(m) else str(m)
+            col_idx = question_start_col + k
+            df_out.iat[i, col_idx] = str(int(m)) if m == int(m) else str(m)
+            
+        # --- NEW: Calculate and Fill CO Totals ---
+        co_totals = {label: 0.0 for label in co_column_indices.keys()}
+        for k, mark in enumerate(marks_for_student):
+            co_label = co_mapping[k]
+            if co_label in co_totals:
+                co_totals[co_label] += mark
 
+        for label, total in co_totals.items():
+            col_idx = co_column_indices[label]
+            df_out.iat[i, col_idx] = str(int(total)) if total == int(total) else f"{total:.2f}"
+        
+        # Verify and write final sum
         final_sum = sum(marks_for_student)
         df_out.iat[i, last_col] = str(int(final_sum)) if final_sum == int(final_sum) else str(final_sum)
 
-    st.success("Marks have been successfully generated.")
+    st.success("Marks and CO totals have been successfully generated.")
+    
+    input_filename = uploaded_file.name
+    base, ext = os.path.splitext(input_filename)
+    output_filename = f"{base}_filled{ext}"
 
-    num_students = n_rows - record_start
+    num_students = n_rows - record_start_row
     if num_students > 0 and num_students <= 10:
         st.subheader("Output Preview")
-        st.dataframe(df_out.iloc[record_start:, :])
+        st.dataframe(df_out.iloc[record_start_row:, :])
     elif num_students > 10:
         st.info(f"Output for {num_students} students generated. Preview is hidden for large files.")
 
