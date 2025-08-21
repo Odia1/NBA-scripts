@@ -101,7 +101,7 @@ if uploaded_file:
     # Build per-question maxima for all questions
     try:
         max_marks_all = pd.to_numeric(
-            df_raw.iloc[2, question_start:question_end].tolist(), errors='raise'
+            df_raw.iloc[3, question_start:question_end].tolist(), errors='raise'
         ).tolist()
     except Exception as e:
         st.error(f"Could not parse max marks in row 3. Details: {e}")
