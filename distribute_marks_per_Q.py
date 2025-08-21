@@ -127,7 +127,9 @@ if uploaded_file:
         row = df_out.iloc[i]
         try:
             total_marks = float(str(row[last_col]).strip())
-        except:
+            if pd.isna(total_marks):
+                raise ValueError("NaN total")
+        except Exception as e:
             continue
 
         # For each section, determine per-q maxima, choose, and step
