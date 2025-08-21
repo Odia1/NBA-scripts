@@ -1,51 +1,65 @@
 import streamlit as st
 import pandas as pd
-import os
 import random
+import os
 import io
 
-st.title("Automated Assignment of Marks Per Question")
+st.title("Automated Assignment of Marks Per Section Constraints")
 
 st.markdown("""
 **Instructions:**
-- Upload your assessment CSV with any column names (template-agnostic).
-- First two columns: Name, Roll.
-- Any number of question columns follow; the last 5 columns are ignored (COs/etc), with the final column being total marks.
-- Student records start from row 6.
-- Output preserves all input columns and rows, only question marks in each student row are updated to random multiples of 0.5 according to constraints.
-- File preview limited to 5 or fewer students. -- Prof. Priyadarsan Patra
+- The first row must be the "SectionMax,Required,..." row, describing for each section: (#questions in section, #student must answer).
+- The third header row (index=2) is per-question mark maxima, which may be floats or ints.
+- For each section: if all maxima are integers, only integer marks are assigned. If any maxima are fractional, assigned marks may be multiples of 0.5.
+- Columns after questions (like CO, etc.) are left untouched.
+- Student records start at row 6.  --Prof. Priyadarsan Patra
 """)
 
 uploaded_file = st.file_uploader("Upload the input CSV", type=["csv"])
 
-def random_partition_with_half_steps(total, max_bounds):
-    """
-    Partition total into len(max_bounds) numbers,
-    with each at most max_bounds[i], all are multiples of 0.5.
-    Returns a list of floats (multiples of 0.5) or None if impossible.
-    """
-    steps = 2  # since 0.5 is the step
-    int_total = int(round(total * steps))
-    int_max_bounds = [int(round(mb * steps)) for mb in max_bounds]
+def is_all_integral(arr):
+    """Test if all elements are integer-valued."""
+    return all(abs(x - int(x)) < 1e-6 for x in arr)
 
-    n = len(max_bounds)
-    parts = []
+def random_partition_with_step(total, per_q_max, choose, step):
+    """
+    Partition total among choose questions, at most per_q_max each,
+    with each assigned mark being a multiple of step (0.5 or 1).
+    Only nonzero marks for chosen questions.
+    """
+    n = len(per_q_max)
+    steps = int(round(1/step))
+    int_total = int(round(total * steps))
+    int_max_bounds = [int(round(m * steps)) for m in per_q_max]
+
+    req = int(choose)
+    if req == 0:
+        if abs(total) < 1e-5:
+            return [0.0] * n
+        return None
+
+    indices = sorted(random.sample(range(n), req))
+    max_selected = [int_max_bounds[i] for i in indices]
     remaining = int_total
-    for i in range(n):
-        max_sum_rest = sum(int_max_bounds[i+1:])
+    vals = []
+    for j in range(req):
+        max_sum_rest = sum(max_selected[j+1:])
         lo = max(0, remaining - max_sum_rest)
-        hi = min(int_max_bounds[i], remaining)
+        hi = min(max_selected[j], remaining)
         if lo > hi:
             return None
-        if i < n - 1:
-            val = random.randrange(lo, hi + 1)
+        if j < req - 1:
+            val = random.randint(lo, hi)
         else:
             val = remaining
-        parts.append(val)
+        vals.append(val)
         remaining -= val
     if remaining != 0:
         return None
-    return [v / steps for v in parts]
+    result = [0.0] * n
+    for idx, v in zip(indices, vals):
+        result[idx] = v / steps
+    return result
 
 if uploaded_file:
     input_filename = uploaded_file.name
@@ -54,55 +68,137 @@ if uploaded_file:
 
     df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
     n_rows, n_cols = df_raw.shape
-    record_start = 5  # Data starts from 6th row (index 5)
 
-    question_start = 2
-    question_end = n_cols - 5  # last 5 cols = 5 COs/others, last col (n_cols-1) = Total
+    # --- Parse Sections information ---
+    section_row = df_raw.iloc[0].fillna('')
+    sec_info = section_row.tolist()[2:]  # Skip first 2 (SectionMax,Required)
+    sections = []
+    i = 0
+    while i < len(sec_info):
+        if sec_info[i] == '':
+            i += 1
+            continue
+        try:
+            num_q = int(sec_info[i])
+            num_choose = int(sec_info[i+1])
+            sections.append({"count": num_q, "choose": num_choose})
+            i += 2
+        except:
+            break
 
+    # Compute question col index ranges for each section
+    question_start = 2  # Questions start at col 2
+    question_ranges = []
+    cur = question_start
+    for sec in sections:
+        rng = (cur, cur + sec["count"])  # end exclusive
+        question_ranges.append(rng)
+        cur += sec["count"]  # move to next
+    question_end = cur   # first col after last question
+
+    # --- Build per-question maxima for all questions ---
     try:
-        max_marks_list = pd.to_numeric(
+        max_marks_all = pd.to_numeric(
             df_raw.iloc[2, question_start:question_end].tolist(),
             errors='raise'
-        ).tolist()  # keep floats
+        ).tolist()  # floats
     except Exception as e:
-        st.error(f"Could not parse max marks in header row 3 (index 2). Details: {e}")
+        st.error(f"Could not parse max marks in row 3. Details: {e}")
         st.stop()
 
     last_col = n_cols - 1  # final column: Total
+    record_start = 5
+
+    # Precompute for each section: which step is allowed
+    section_steps = []
+    section_maxima = []
+    s_cur = 0
+    for sec in sections:
+        per_q = max_marks_all[s_cur:s_cur+sec['count']]
+        if is_all_integral(per_q):
+            section_steps.append(1)    # integer-only
+        else:
+            section_steps.append(0.5)  # allow half-marks
+        section_maxima.append(per_q)
+        s_cur += sec['count']
 
     df_out = df_raw.copy()
-    output_rows = 0
     for i in range(record_start, n_rows):
         row = df_out.iloc[i]
         try:
             total_marks = float(str(row[last_col]).strip())
         except:
-            st.warning(f"Could not read total marks for row {i+1}. Skipping student.")
             continue
 
-        max_possible = sum(max_marks_list)
-        if total_marks < 0 or total_marks > max_possible + 1e-6:
-            st.warning(f"Total marks {total_marks} at row {i+1} is impossible (max {max_possible}). Skipping student.")
+        # For each section, determine per-q maxima, choose, and step
+        marks_all_sections = []
+        ok = True
+        # First, for all but last section, randomly pick the per-section total
+        max_for_section = []
+        for m, sec in zip(section_maxima, sections):
+            max_for_section.append(sum(sorted(m, reverse=True)[:sec["choose"]]))
+        total_max = sum(max_for_section)
+        if total_marks < 0 or total_marks > total_max + 1e-6:
+            ok = False
+        # Randomly split total_marks among sections, respecting per-section maxima
+        attempts = 800
+        success = False
+        for _ in range(attempts):
+            splits = []
+            sr = len(sections)
+            # For even splitting using least step size so sum matches
+            step_all = min(section_steps)
+            all_steps = [int(round(1/st)) for st in section_steps]
+            max_s = [int(round(m*st)) for m, st in zip(max_for_section, all_steps)]
+            rem = int(round(total_marks * min(all_steps))) # use smallest granularity for section split
+            for j in range(sr):
+                max_sum_rest = sum(max_s[j+1:])
+                lo = max(0, rem - max_sum_rest)
+                hi = min(max_s[j], rem)
+                if lo > hi:
+                    ok = False
+                    break
+                if j < sr - 1:
+                    val = random.randint(lo, hi)
+                else:
+                    val = rem
+                splits.append(val / all_steps[j])
+                rem -= val
+            if not ok:
+                continue
+            # Now, assign to each section
+            marks_all_sections = []
+            for sec_idx, (start, end) in enumerate(question_ranges):
+                per_q_max = section_maxima[sec_idx]
+                req = sections[sec_idx]['choose']
+                sec_total = splits[sec_idx]
+                step = section_steps[sec_idx]
+                sec_attempts = 30
+                done = False
+                for _ in range(sec_attempts):
+                    marks = random_partition_with_step(sec_total, per_q_max, req, step)
+                    if marks is not None:
+                        marks_all_sections += marks
+                        done = True
+                        break
+                if not done:
+                    ok = False
+                    break
+            if ok and len(marks_all_sections) == question_end - question_start:
+                for k, m in enumerate(marks_all_sections):
+                    df_out.iat[i, question_start + k] = str(int(m) if is_all_integral([m]) else m)
+                df_out.iat[i, last_col] = str(round(sum(marks_all_sections), 2))
+                success = True
+                break
+        if not success:
+            st.error(f"Could not generate marks for row {i+1} (total={total_marks}). Skipped.")
             continue
-
-        marks = random_partition_with_half_steps(total_marks, max_marks_list)
-        if marks is None:
-            st.error(f"Could not generate marks for row {i+1}. Skipped.")
-            continue
-
-        # Update only the question columns in df_out for this student
-        for colidx, m in enumerate(marks, start=question_start):
-            df_out.iat[i, colidx] = str(m)
-        # Update total column to sum for precision safety
-        df_out.iat[i, last_col] = str(round(sum(marks), 2))
-        output_rows += 1
 
     num_students = n_rows - record_start
-
     if num_students <= 5:
         st.subheader("Input Student Records")
         st.dataframe(df_raw.iloc[record_start:, :])
-        st.subheader("Output (All Columns, Assigned Marks in 0.5 steps)")
+        st.subheader("Output (All Columns, Section Constraints Met, Integer/Halfmark as Allowed)")
         st.dataframe(df_out.iloc[record_start:, :])
     else:
         st.info(f"Input and output data not displayed (record count: {num_students}, limit for display: 5)")
