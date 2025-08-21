@@ -7,7 +7,7 @@ import io
 st.title("Assignment of Marks from a total")
 
 st.markdown("""
-- The first row: SectionMax,Required,...
+- The first row specifies a number of sections as (NumQuesInSection,RequiredToAnswer) pairs.
 - The 4th header row (`Mark Per Que` in row 3) is per-question maxima.
 - For each section, only `Required` number of questions get marks; others get zero.
 - Marks are integers if possible (for integer maxima), else half marks allowed.
