@@ -21,6 +21,51 @@ def is_all_integral(arr):
     """Test if all elements are integer-valued."""
     return all(abs(x - int(x)) < 1e-6 for x in arr)
 
+def random_partition_with_step_always_fill(total, per_q_max, choose, step):
+    """
+    Partition total among choose questions, at most per_q_max each,
+    nonzero marks only for randomly chosen `choose` questions, zeros for rest.
+    Each assigned mark is a multiple of `step`.
+    Guaranteed to assign zeros for not-chosen.
+    """
+    n = len(per_q_max)
+    steps = int(round(1/step))
+    int_total = int(round(total * steps))
+    int_max_bounds = [int(round(m * steps)) for m in per_q_max]
+
+    req = int(choose)
+    # If choose >= n, assign marks to all
+    if req >= n:
+        chosen_indices = list(range(n))
+    else:
+        chosen_indices = sorted(random.sample(range(n), req))
+    max_selected = [int_max_bounds[i] for i in chosen_indices]
+    # can the total be distributed at all?
+    if int_total > sum(max_selected):
+        return None
+
+    # Partition int_total among chosen_indices
+    vals = []
+    remaining = int_total
+    for j in range(req):
+        max_sum_rest = sum(max_selected[j+1:])
+        lo = max(0, remaining - max_sum_rest)
+        hi = min(max_selected[j], remaining)
+        if lo > hi:
+            return None
+        if j < req - 1:
+            val = random.randint(lo, hi)
+        else:
+            val = remaining
+        vals.append(val)
+        remaining -= val
+    if remaining != 0:
+        return None
+    result = [0.0] * n
+    for idx, v in zip(chosen_indices, vals):
+        result[idx] = v / steps
+    return result
+
 def random_partition_with_step(total, per_q_max, choose, step):
     """
     Partition total among choose questions, at most per_q_max each,
@@ -175,17 +220,12 @@ if uploaded_file:
                 req = sections[sec_idx]['choose']
                 sec_total = splits[sec_idx]
                 step = section_steps[sec_idx]
-                sec_attempts = 30
-                done = False
-                for _ in range(sec_attempts):
-                    marks = random_partition_with_step(sec_total, per_q_max, req, step)
-                    if marks is not None:
-                        marks_all_sections += marks
-                        done = True
-                        break
-                if not done:
+                marks = random_partition_with_step_always_fill(sec_total, per_q_max, req, step)
+                if marks is None:
                     ok = False
                     break
+                marks_all_sections += marks
+
             if ok and len(marks_all_sections) == question_end - question_start:
                 for k, m in enumerate(marks_all_sections):
                     df_out.iat[i, question_start + k] = str(int(m) if is_all_integral([m]) else m)
