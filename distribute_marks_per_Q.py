@@ -18,6 +18,25 @@ st.markdown("""
 """)
 #The script now **supports pre-filled marks**. Leave a question's cell empty to have it auto-filled.
 
+# --- Template Download Section ---
+st.subheader("Download Template")
+template_csv_string = """SectionMax,Choose,10,10,12,8,3,2,,,,,,,,,,,,,,,,,,,,,,,,
+Question Number,,Q1A,Q1B,Q1C,Q1D,Q1E,Q1F,Q1G,Q1H,Q1I,Q1J,Q2A,Q2B,Q2C,Q2D,Q2E,Q2F,Q2G,Q2H,Q2I,Q2J,Q2K,Q2L,Q3A,Q4A,Q5A,CO1,CO2,CO3,CO4,Total
+Question Level(Blooms Taxonomy),,1,2,2,4,3,2,2,3,3,1,2,2,2,2,3,3,2,2,2,3,2,2,2,3,2,,,,,
+Mark Per Que,,2,2,2,2,2,2,2,2,2,2,6,6,6,6,6,6,6,6,6,6,6,6,16,16,16,,,,,140
+CO,,CO1,CO1,CO1,CO2,CO2,CO3,CO3,CO3,CO4,CO4,CO1,CO1,CO1,CO2,CO2,CO2,CO3,CO3,CO3,CO4,CO4,CO4,CO1,CO2,CO3,,,,,
+Name of the student,Roll Number,Marks per Question,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+M. PREETI PRIYA,202161001,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,80
+SALA  MANOJ,202160002,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,52
+"""
+st.download_button(
+   label="Download Input Template (.csv)",
+   data=template_csv_string,
+   file_name="multi_section_template.csv",
+   mime="text/csv",
+)
+st.divider()
+
 # User choice widget is now always visible
 mark_granularity = st.radio(
     "Allow partial marks (multiples of 0.5)?",
@@ -25,7 +44,6 @@ mark_granularity = st.radio(
     horizontal=True,
     key="granularity_choice" # Added a key here for good practice
 )
-
 
 uploaded_file = st.file_uploader("Upload the input CSV", type=["csv"], key="file_uploader")
 
