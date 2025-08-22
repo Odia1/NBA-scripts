@@ -14,7 +14,7 @@ st.markdown("""
 - For each section, only `Choose` number of questions get marks; others get zero.
 - Marks are integers if possible (for integer maxima), else half marks allowed. Choose if half-marks allowed. Partial Marks allowed for a question.
 - The student's total marks column is the last (5th after question columns end) column.
-- Student records start at row 6.    --Prof. Priyadrsan Patra
+- Student records start at row 6. The last column (after COs) contains the total.
 """)
 #The script now **supports pre-filled marks**. Leave a question's cell empty to have it auto-filled.
 # --- Template Download Section ---
@@ -22,7 +22,7 @@ st.subheader("Download Template if desired")
 template_csv_string = """SectionMax,Choose,10,10,12,8,3,2,,,,,,,,,,,,,,,,,,,,,,,,
 Question Number,,Q1A,Q1B,Q1C,Q1D,Q1E,Q1F,Q1G,Q1H,Q1I,Q1J,Q2A,Q2B,Q2C,Q2D,Q2E,Q2F,Q2G,Q2H,Q2I,Q2J,Q2K,Q2L,Q3A,Q4A,Q5A,CO1,CO2,CO3,CO4,Total
 Question Level(Blooms Taxonomy),,1,2,2,4,3,2,2,3,3,1,2,2,2,2,3,3,2,2,2,3,2,2,2,3,2,,,,,
-Mark Per Que,,2,2,2,2,2,2,2,2,2,2,6,6,6,6,6,6,6,6,6,6,6,6,16,16,16,,,,,140
+Mark Per Que,,2,2,2,2,2,2,2,2,2,2,6,6,6,6,6,6,6,6,6,6,6,6,16,16,16,,,,,
 CO,,CO1,CO1,CO1,CO2,CO2,CO3,CO3,CO3,CO4,CO4,CO1,CO1,CO1,CO2,CO2,CO2,CO3,CO3,CO3,CO4,CO4,CO4,CO1,CO2,CO3,,,,,
 Name of the student,Roll Number,Marks per Question,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 Ms. First,202181001,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,81
@@ -35,12 +35,15 @@ st.download_button(
    file_name="multi_section_template.csv",
    mime="text/csv",
 )
+st.write("_--Authored by Prof. Priyadarsan Patra_")
 st.divider()
 
 # --- Main Application ---
 mark_granularity = st.radio(
     "Allow partial marks (multiples of 0.5)?", ("No", "Yes"), horizontal=True, key="granularity_choice"
 )
+
+
 uploaded_file = st.file_uploader("Upload your input CSV", type=["csv"], key="file_uploader")
 
 def partition_with_steps(total, per_q_max, choose, step_size):
