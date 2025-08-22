@@ -39,7 +39,7 @@ st.divider()
 
 # --- Main Application ---
 mark_granularity = st.radio(
-    "Allow partial marks (multiples of 0.5)?", ("Yes", "No"), horizontal=True, key="granularity_choice"
+    "Allow partial marks (multiples of 0.5)?", ("No", "Yes"), horizontal=True, key="granularity_choice"
 )
 uploaded_file = st.file_uploader("Upload your input CSV", type=["csv"], key="file_uploader")
 
